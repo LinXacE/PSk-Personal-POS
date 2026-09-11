@@ -72,23 +72,53 @@ relative to a configurable default currency.
 ```bash
 npm install
 
-# Point DATABASE_URL (in .env) at your own PostgreSQL instance
+# Copy the example env file and fill in your own values
+cp .env.example .env
+
+# Point DATABASE_URL (in .env) at your own PostgreSQL instance, then:
 npx prisma migrate dev --name init
+
+# Create the first admin login (uses SEED_ADMIN_USERNAME/PASSWORD from .env)
+npm run db:seed
 
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to view the app.
+Open [http://localhost:3000](http://localhost:3000) and sign in with the
+seeded admin account.
+
+## Authentication
+
+Simple username/password auth backed by the `User` table (passwords hashed
+with bcrypt). On login, a signed JWT session is set as an httpOnly cookie;
+a proxy (middleware) guards every route except `/login` and
+`/api/auth/login`, redirecting unauthenticated visitors to sign in first.
 
 ## Project structure
 
 ```
-prisma/schema.prisma     Database schema for all modules above
-src/app/                 Next.js App Router pages & API routes
-src/lib/prisma.ts        Shared Prisma client instance
+prisma/schema.prisma        Database schema for all modules above
+prisma/seed.ts              Creates the first admin user
+src/proxy.ts                Route guard — redirects unauthenticated requests to /login
+src/lib/auth.ts              Session (JWT) helpers
+src/lib/prisma.ts            Shared Prisma client instance
+src/app/login/               Login page
+src/app/(dashboard)/         Authenticated app shell + module pages
+src/app/(dashboard)/main-categories/   Main Category CRUD (list, create, edit, delete)
+src/app/(dashboard)/brands/             Brand CRUD (list, create, edit, delete)
+src/app/api/                 REST API routes backing the pages above
+src/components/ui/           Shared Button and Modal components
 ```
+
+## Implemented so far
+
+- **Auth**: login/logout, session-protected routes, seeded admin user.
+- **Main Category**: list with Product/Service filter, create, edit,
+  delete (blocked while sub-categories or products are still linked).
+- **Brand**: list, create, edit, delete (blocked while products are still
+  linked).
 
 ## Status
 
-Early scaffold: schema and base layout are in place. Module UIs and API
-routes are being built out incrementally, one module at a time.
+Actively being built out module by module. Next up: Sub Category and Unit,
+followed by the full Product page.
