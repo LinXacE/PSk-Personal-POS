@@ -1,0 +1,367 @@
+// PSk-Personal-POS — Prisma schema
+// Modeled from project sketch notes: Inventory, Product, Purchase/Sales/Transfer/Stock-Adjustment,
+// Supplier, Sales Contracts / AR, and Engineer Service modules.
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Shared enums
+// ---------------------------------------------------------------------------
+
+enum ProductType {
+  PRODUCT
+  SERVICE
+}
+
+enum UnitKind {
+  BASE
+  PURCHASE
+  SELLING
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+}
+
+enum SalesContractStatus {
+  DRAFT
+  ACTIVE
+  FULFILLED
+  CANCELLED
+}
+
+enum ServiceTicketStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// Inventory module: Main Category -> Sub Category, Brand, Unit
+// ---------------------------------------------------------------------------
+
+model MainCategory {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  type          ProductType   @default(PRODUCT) // Product vs Service, per sketch
+  subCategories SubCategory[]
+  products      Product[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model SubCategory {
+  id             String       @id @default(cuid())
+  name           String
+  mainCategory   MainCategory @relation(fields: [mainCategoryId], references: [id])
+  mainCategoryId String
+  products       Product[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([mainCategoryId, name])
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// A unit "family" groups a base unit with its purchase/selling conversions,
+// e.g. base = pcs, purchase = carton (x24), selling = pcs.
+model Unit {
+  id            String    @id @default(cuid())
+  name          String    @unique // e.g. "pcs", "box", "carton"
+  kind          UnitKind  @default(BASE)
+  baseUnit      Unit?     @relation("UnitConversion", fields: [baseUnitId], references: [id])
+  baseUnitId    String?
+  derivedUnits  Unit[]    @relation("UnitConversion")
+  conversionQty Float     @default(1) // how many base units per this unit
+  products      Product[] @relation("ProductBaseUnit")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Currency & Price Groups
+// ---------------------------------------------------------------------------
+
+model Currency {
+  id           String          @id @default(cuid())
+  code         String          @unique // "MMK", "USD"
+  name         String
+  isDefault    Boolean         @default(false)
+  exchangeRate Float           @default(1) // relative to default currency
+  prices       ProductPrice[]
+  purchases    PurchaseOrder[]
+  sales        SalesOrder[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+model PriceGroup {
+  id        String         @id @default(cuid())
+  name      String         @unique // e.g. "Retail", "Wholesale", "VIP"
+  isDefault Boolean        @default(false)
+  prices    ProductPrice[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Product & related lookups
+// ---------------------------------------------------------------------------
+
+model Product {
+  id   String      @id @default(cuid())
+  name String
+  code String      @unique
+  type ProductType @default(PRODUCT)
+
+  mainCategory   MainCategory @relation(fields: [mainCategoryId], references: [id])
+  mainCategoryId String
+  subCategory    SubCategory? @relation(fields: [subCategoryId], references: [id])
+  subCategoryId  String?
+  brand          Brand?       @relation(fields: [brandId], references: [id])
+  brandId        String?
+
+  baseUnit   Unit   @relation("ProductBaseUnit", fields: [baseUnitId], references: [id])
+  baseUnitId String
+
+  barcodes       ProductBarcode[]
+  prices         ProductPrice[]
+  documents      ProductDocument[]
+  purchaseLines  PurchaseOrderLine[]
+  salesLines     SalesOrderLine[]
+  stockMovements StockMovement[]
+  contractLines  SalesContractLine[]
+
+  generalData Json? // free-form spec sheet fields
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum BarcodeSource {
+  ORIGINAL // manufacturer barcode, scanned as-is
+  SYSTEM // generated by the system (sequential or random)
+}
+
+model ProductBarcode {
+  id        String        @id @default(cuid())
+  product   Product       @relation(fields: [productId], references: [id])
+  productId String
+  code      String        @unique
+  source    BarcodeSource @default(SYSTEM)
+  createdAt DateTime      @default(now())
+}
+
+// Selling price per price-group / currency; "default" purchasing price lives on Product via latest PurchaseOrderLine.
+model ProductPrice {
+  id           String     @id @default(cuid())
+  product      Product    @relation(fields: [productId], references: [id])
+  productId    String
+  priceGroup   PriceGroup @relation(fields: [priceGroupId], references: [id])
+  priceGroupId String
+  currency     Currency   @relation(fields: [currencyId], references: [id])
+  currencyId   String
+  price        Float
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([productId, priceGroupId, currencyId])
+}
+
+// Attachments per product: FDA/NHL certificates and other compliance documents.
+model ProductDocument {
+  id        String    @id @default(cuid())
+  product   Product   @relation(fields: [productId], references: [id])
+  productId String
+  label     String // e.g. "FDA Certificate", "NHL Certificate"
+  fileUrl   String
+  issuedAt  DateTime?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Supplier & Purchasing
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id        String          @id @default(cuid())
+  name      String
+  contact   String?
+  address   String?
+  purchases PurchaseOrder[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  reference  String              @unique
+  supplier   Supplier            @relation(fields: [supplierId], references: [id])
+  supplierId String
+  currency   Currency            @relation(fields: [currencyId], references: [id])
+  currencyId String
+  lines      PurchaseOrderLine[]
+  orderedAt  DateTime            @default(now())
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+}
+
+model PurchaseOrderLine {
+  id              String        @id @default(cuid())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrderId String
+  product         Product       @relation(fields: [productId], references: [id])
+  productId       String
+  quantity        Float
+  unitCost        Float // latest purchasing price, per sketch
+}
+
+// ---------------------------------------------------------------------------
+// Sales (POS) module
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id             String          @id @default(cuid())
+  name           String
+  contact        String?
+  address        String?
+  sales          SalesOrder[]
+  contracts      SalesContract[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  serviceTickets ServiceTicket[]
+}
+
+model SalesOrder {
+  id         String           @id @default(cuid())
+  reference  String           @unique
+  customer   Customer?        @relation(fields: [customerId], references: [id])
+  customerId String?
+  currency   Currency         @relation(fields: [currencyId], references: [id])
+  currencyId String
+  lines      SalesOrderLine[]
+  soldAt     DateTime         @default(now())
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+}
+
+model SalesOrderLine {
+  id           String     @id @default(cuid())
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id])
+  salesOrderId String
+  product      Product    @relation(fields: [productId], references: [id])
+  productId    String
+  quantity     Float
+  unitPrice    Float
+}
+
+// ---------------------------------------------------------------------------
+// Transfer & Stock Adjustment (feed into a single Inventory ledger)
+// ---------------------------------------------------------------------------
+
+model Warehouse {
+  id        String          @id @default(cuid())
+  name      String          @unique
+  address   String?
+  movements StockMovement[]
+  createdAt DateTime        @default(now())
+}
+
+// Unified ledger: purchase / sale / transfer / adjustment all write here.
+model StockMovement {
+  id          String            @id @default(cuid())
+  product     Product           @relation(fields: [productId], references: [id])
+  productId   String
+  warehouse   Warehouse         @relation(fields: [warehouseId], references: [id])
+  warehouseId String
+  type        StockMovementType
+  quantity    Float // positive = in, negative = out (keep sign consistent per type)
+  reference   String? // links back to PurchaseOrder / SalesOrder / Transfer / Adjustment id
+  note        String?
+  createdAt   DateTime          @default(now())
+}
+
+model StockTransfer {
+  id            String   @id @default(cuid())
+  reference     String   @unique
+  fromWarehouse String
+  toWarehouse   String
+  note          String?
+  createdAt     DateTime @default(now())
+}
+
+model StockAdjustment {
+  id        String   @id @default(cuid())
+  reference String   @unique
+  reason    String
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Sales Contracts / A-R (accounts receivable) module
+// ---------------------------------------------------------------------------
+
+model SalesContract {
+  id         String              @id @default(cuid())
+  reference  String              @unique
+  customer   Customer            @relation(fields: [customerId], references: [id])
+  customerId String
+  status     SalesContractStatus @default(DRAFT)
+  lines      SalesContractLine[]
+  startDate  DateTime?
+  endDate    DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+}
+
+model SalesContractLine {
+  id              String        @id @default(cuid())
+  contract        SalesContract @relation(fields: [contractId], references: [id])
+  contractId      String
+  product         Product       @relation(fields: [productId], references: [id])
+  productId       String
+  quantity        Float
+  agreedUnitPrice Float
+}
+
+// ---------------------------------------------------------------------------
+// Engineer Service module
+// ---------------------------------------------------------------------------
+
+model ServiceTicket {
+  id          String              @id @default(cuid())
+  reference   String              @unique
+  customer    Customer?           @relation(fields: [customerId], references: [id])
+  customerId  String?
+  title       String
+  description String?
+  status      ServiceTicketStatus @default(OPEN)
+  assignedTo  String? // engineer name/id, kept simple until a Staff model is needed
+  scheduledAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
