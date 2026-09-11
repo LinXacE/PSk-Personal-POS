@@ -4,7 +4,9 @@ import { LogoutButton } from "./logout-button";
 
 const NAV_LINKS = [
   { href: "/main-categories", label: "Main Category" },
+  { href: "/sub-categories", label: "Sub Category" },
   { href: "/brands", label: "Brand" },
+  { href: "/units", label: "Unit" },
 ];
 
 export default async function DashboardLayout({

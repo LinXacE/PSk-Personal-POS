@@ -5,9 +5,9 @@ const MODULES = [
     group: "Inventory",
     items: [
       { label: "Main Category", href: "/main-categories" },
-      { label: "Sub Category", href: null },
+      { label: "Sub Category", href: "/sub-categories" },
       { label: "Brand", href: "/brands" },
-      { label: "Unit", href: null },
+      { label: "Unit", href: "/units" },
       { label: "Product", href: null },
     ],
   },

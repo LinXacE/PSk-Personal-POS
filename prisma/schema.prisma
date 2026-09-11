@@ -114,8 +114,15 @@ model Unit {
   derivedUnits  Unit[]    @relation("UnitConversion")
   conversionQty Float     @default(1) // how many base units per this unit
   products      Product[] @relation("ProductBaseUnit")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+
+  // Places this unit was used as the "entered" unit on a transaction line
+  // (e.g. someone bought/sold/adjusted stock in "box" while base unit is "pcs").
+  purchaseLineEntries  PurchaseOrderLine[] @relation("PurchaseLineEntryUnit")
+  salesLineEntries     SalesOrderLine[]    @relation("SalesLineEntryUnit")
+  stockMovementEntries StockMovement[]     @relation("StockMovementEntryUnit")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------
@@ -253,8 +260,17 @@ model PurchaseOrderLine {
   purchaseOrderId String
   product         Product       @relation(fields: [productId], references: [id])
   productId       String
-  quantity        Float
-  unitCost        Float // latest purchasing price, per sketch
+
+  // What the user actually typed in, e.g. "24" boxes.
+  entryQuantity Float
+  entryUnit     Unit   @relation("PurchaseLineEntryUnit", fields: [entryUnitId], references: [id])
+  entryUnitId   String
+
+  // entryQuantity converted to the product's smallest base unit for stock-keeping,
+  // e.g. 24 boxes x 10 bottles/box = 240 (stored here, in bottles).
+  quantity Float
+
+  unitCost Float // purchase cost per entry unit, per sketch
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +308,15 @@ model SalesOrderLine {
   salesOrderId String
   product      Product    @relation(fields: [productId], references: [id])
   productId    String
-  quantity     Float
-  unitPrice    Float
+
+  // What the user actually typed in, e.g. "2" boxes at checkout.
+  entryQuantity Float
+  entryUnit     Unit   @relation("SalesLineEntryUnit", fields: [entryUnitId], references: [id])
+  entryUnitId   String
+
+  // entryQuantity converted to the product's smallest base unit, for stock deduction.
+  quantity  Float
+  unitPrice Float // selling price per entry unit
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +332,9 @@ model Warehouse {
 }
 
 // Unified ledger: purchase / sale / transfer / adjustment all write here.
+// `quantity` is always expressed in the product's smallest base unit, so
+// on-hand stock can be summed directly regardless of which unit a
+// purchase/sale/adjustment was originally entered in.
 model StockMovement {
   id          String            @id @default(cuid())
   product     Product           @relation(fields: [productId], references: [id])
@@ -316,10 +342,17 @@ model StockMovement {
   warehouse   Warehouse         @relation(fields: [warehouseId], references: [id])
   warehouseId String
   type        StockMovementType
-  quantity    Float // positive = in, negative = out (keep sign consistent per type)
-  reference   String? // links back to PurchaseOrder / SalesOrder / Transfer / Adjustment id
-  note        String?
-  createdAt   DateTime          @default(now())
+  quantity    Float // in base units; positive = in, negative = out (keep sign consistent per type)
+
+  // Optional: preserves what was actually typed (e.g. "5 cartons") for display/audit,
+  // even though `quantity` above is already converted to base units.
+  entryQuantity Float?
+  entryUnit     Unit?   @relation("StockMovementEntryUnit", fields: [entryUnitId], references: [id])
+  entryUnitId   String?
+
+  reference String? // links back to PurchaseOrder / SalesOrder / Transfer / Adjustment id
+  note      String?
+  createdAt DateTime @default(now())
 }
 
 model StockTransfer {
