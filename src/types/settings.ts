@@ -31,3 +31,11 @@ export type WarehouseDTO = {
   movementCount: number;
   batchCount: number;
 };
+
+export type CustomerDTO = {
+  id: string;
+  name: string;
+  contact: string | null;
+  address: string | null;
+  salesCount: number;
+};

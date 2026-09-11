@@ -13,6 +13,8 @@ const NAV_LINKS = [
   { href: "/suppliers", label: "Supplier" },
   { href: "/warehouses", label: "Warehouse" },
   { href: "/purchases", label: "Purchase" },
+  { href: "/customers", label: "Customer" },
+  { href: "/sales", label: "Sales (POS)" },
 ];
 
 export default async function DashboardLayout({

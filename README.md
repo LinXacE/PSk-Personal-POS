@@ -123,7 +123,10 @@ src/app/(dashboard)/suppliers/          Supplier CRUD (name, contact, address)
 src/app/(dashboard)/products/           Product list + full create/edit form
 src/app/(dashboard)/warehouses/         Warehouse CRUD (name, address)
 src/app/(dashboard)/purchases/          Purchase Order list + create/edit/receive/payment UI
+src/app/(dashboard)/customers/           Customer CRUD (name, contact, address)
+src/app/(dashboard)/sales/               Sales (POS) list + create/edit/complete UI
 src/lib/purchase.ts          Reference/batch-number generation, total + payment-status helpers
+src/lib/sales.ts             Reference generation, FEFO batch-picking, total helpers
 src/app/api/                 REST API routes backing the pages above
 src/components/ui/           Shared Button and Modal components
 ```
@@ -154,6 +157,9 @@ src/components/ui/           Shared Button and Modal components
   linked purchase orders, stock batches, or stock movements.
 - **Purchase**: full order → receive workflow, payment tracking, and
   batch/expiry-tracked stock intake — see "Purchase module" below.
+- **Customer**: name, contact, address — see "Customer module" below.
+- **Sales (POS)**: full draft → complete workflow with FEFO batch picking
+  — see "Sales (POS) module" below.
 
 ## Product module
 
@@ -250,13 +256,77 @@ only the separate Receive action does.
 - A full edit (changing supplier/warehouse/lines) is only allowed while
   the order is still `ORDERED`.
 
+## Customer module
+
+- **Customer**: name, contact, address. Not required for a sale — walk-in
+  sales simply leave `customerId` unset. Delete blocked while the
+  customer still has linked sales, contracts, or service tickets.
+
+## Sales (POS) module
+
+The Sales page (`/sales`) implements a two-step **draft → complete**
+workflow, mirroring Purchase's order → receive shape but simpler, since a
+sale is always fully paid at checkout and completes in one shot (no
+partial completion).
+
+### Draft
+
+- **Customer** (optional — walk-in), **Warehouse** (stock will be
+  deducted from here on completion), **Currency**, **Price Group**
+  (optional; used only to auto-fill line prices from that product's
+  `ProductPrice` rows — always manually overridable), **Sale Date**.
+- **Reference Number** — Auto-generate (`SO-0001`, sequential) or Manual
+  entry, same pattern as Purchase Order / Product Code.
+- **Sales Lines** — repeatable rows of {Product, entry Unit (any unit in
+  that product's unit family), entry Quantity, Unit Price}. The line's
+  base-unit quantity is computed the same way as Purchase lines.
+- Saving a Sale creates it with status **DRAFT** and no stock effect —
+  nothing is checked against available stock until you complete it.
+- A draft can be freely edited or deleted. There's no separate
+  `CANCELLED` status; an unwanted draft is just deleted.
+
+### Complete (FEFO stock deduction)
+
+- The **Complete Sale** action is the only thing that ever deducts stock
+  for a sale, and it does so in one all-or-nothing step — there's no
+  partial completion like Purchase's `PARTIALLY_RECEIVED`.
+- For every line, available `StockBatch` rows for that product in the
+  sale's warehouse are consumed **FEFO (First-Expired, First-Out)** —
+  soonest `expiryDate` first; batches with no expiry date are treated as
+  expiring last; ties are broken by `receivedAt` (oldest received first).
+  A single line can draw from multiple batches if the soonest-expiring
+  one doesn't have enough on its own — each portion taken is recorded as
+  a `SalesOrderLineBatch` row (batch, quantity, unit cost).
+- **Oversell is blocked**: if the total requested quantity for any line
+  exceeds what's available across all of that product's batches in the
+  warehouse, the *entire* completion is rejected with a descriptive error
+  (e.g. "Not enough stock for X: requested 35, only 30 available") and no
+  stock or order state changes for any line — checked before any
+  mutation, inside one transaction.
+- On success, each batch portion also creates a `StockMovement` (type
+  `SALE`, negative quantity) referencing that batch, so every sale stays
+  traceable to the exact lot(s) it drew from — same ledger Purchase writes
+  to. The order's `status` becomes **COMPLETED** and `completedAt` is set.
+
+### Locked after completion
+
+- A **COMPLETED** sale is permanent: edit and delete both return a 409,
+  and completing it again is rejected. This mirrors a real receipt —
+  unlike Purchase, there's no cancel action for a completed (or draft)
+  sale beyond deleting the draft itself.
+- Payment is always "fully paid at checkout" by design, so — unlike
+  Purchase — Sales has no `PaymentStatus` / `amountPaid` fields or Payment
+  action at all.
+
 ## Status
 
 Actively being built out module by module. Main Category, Sub Category,
-Brand, Unit, Currency, Price Group, Supplier, Product, Warehouse, and
-Purchase are all fully working end to end. Purchase covers the full
-order → receive workflow, auto/manual reference and batch numbering,
-expiry dates, payment tracking, and status-based edit/cancel/delete
-guards, and writes to the unified `StockMovement` ledger via `StockBatch`.
-Next up: Sales (POS), which will read stock from the batches Purchase
-creates.
+Brand, Unit, Currency, Price Group, Supplier, Product, Warehouse,
+Purchase, Customer, and Sales (POS) are all fully working end to end.
+Purchase covers the full order → receive workflow, auto/manual reference
+and batch numbering, expiry dates, payment tracking, and status-based
+edit/cancel/delete guards. Sales (POS) covers the draft → complete
+workflow with FEFO batch picking, all-or-nothing oversell blocking, and a
+fully locked-after-complete order — both modules write to the unified
+`StockMovement` ledger via `StockBatch`. Next up: Transfer and Stock
+Adjustment, to round out the inventory-driving operations.

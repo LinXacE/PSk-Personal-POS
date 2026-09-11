@@ -56,6 +56,11 @@ enum PaymentStatus {
   PAID
 }
 
+enum SalesOrderStatus {
+  DRAFT // saved, stock not yet deducted; freely editable/deletable
+  COMPLETED // stock deducted via FEFO batch consumption; permanent, no edit/cancel
+}
+
 enum ServiceTicketStatus {
   OPEN
   IN_PROGRESS
@@ -156,12 +161,13 @@ model Currency {
 }
 
 model PriceGroup {
-  id        String         @id @default(cuid())
-  name      String         @unique // e.g. "Retail", "Wholesale", "VIP"
-  isDefault Boolean        @default(false)
-  prices    ProductPrice[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id          String         @id @default(cuid())
+  name        String         @unique // e.g. "Retail", "Wholesale", "VIP"
+  isDefault   Boolean        @default(false)
+  prices      ProductPrice[]
+  salesOrders SalesOrder[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +338,8 @@ model StockBatch {
   receivedAt DateTime  @default(now())
   expiryDate DateTime?
 
-  movements StockMovement[]
+  movements       StockMovement[]
+  saleAllocations SalesOrderLineBatch[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -355,16 +362,26 @@ model Customer {
 }
 
 model SalesOrder {
-  id         String           @id @default(cuid())
-  reference  String           @unique
-  customer   Customer?        @relation(fields: [customerId], references: [id])
-  customerId String?
-  currency   Currency         @relation(fields: [currencyId], references: [id])
-  currencyId String
-  lines      SalesOrderLine[]
-  soldAt     DateTime         @default(now())
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  id              String           @id @default(cuid())
+  reference       String           @unique
+  referenceIsAuto Boolean          @default(true) // whether `reference` was system-generated vs typed in
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  customerId      String?
+  currency        Currency         @relation(fields: [currencyId], references: [id])
+  currencyId      String
+  warehouse       Warehouse        @relation(fields: [warehouseId], references: [id])
+  warehouseId     String
+  priceGroup      PriceGroup?      @relation(fields: [priceGroupId], references: [id])
+  priceGroupId    String?
+  lines           SalesOrderLine[]
+
+  status SalesOrderStatus @default(DRAFT)
+
+  note        String?
+  soldAt      DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model SalesOrderLine {
@@ -382,6 +399,24 @@ model SalesOrderLine {
   // entryQuantity converted to the product's smallest base unit, for stock deduction.
   quantity  Float
   unitPrice Float // selling price per entry unit
+
+  // Which batch(es) this line's stock was actually deducted from, filled in
+  // when the Sales Order is completed (FEFO — soonest expiry first).
+  allocations SalesOrderLineBatch[]
+}
+
+// Records which batch(es) a Sales Order line's stock was deducted from.
+// A line can span multiple batches when one batch alone doesn't cover the
+// full quantity sold (FEFO: soonest-expiry batch consumed first).
+model SalesOrderLineBatch {
+  id               String         @id @default(cuid())
+  salesOrderLine   SalesOrderLine @relation(fields: [salesOrderLineId], references: [id])
+  salesOrderLineId String
+  batch            StockBatch     @relation(fields: [batchId], references: [id])
+  batchId          String
+  quantity         Float // base units consumed from this batch
+  unitCost         Float // batch's per-base-unit cost at the time of sale (for COGS)
+  createdAt        DateTime       @default(now())
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +430,7 @@ model Warehouse {
   movements      StockMovement[]
   batches        StockBatch[]
   purchaseOrders PurchaseOrder[]
+  salesOrders    SalesOrder[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
