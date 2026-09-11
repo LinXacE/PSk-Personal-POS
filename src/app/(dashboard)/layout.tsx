@@ -11,6 +11,8 @@ const NAV_LINKS = [
   { href: "/currencies", label: "Currency" },
   { href: "/price-groups", label: "Price Group" },
   { href: "/suppliers", label: "Supplier" },
+  { href: "/warehouses", label: "Warehouse" },
+  { href: "/purchases", label: "Purchase" },
 ];
 
 export default async function DashboardLayout({

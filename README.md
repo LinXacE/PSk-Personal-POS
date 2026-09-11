@@ -43,10 +43,19 @@ project spec:
 All of the following write to a single, unified stock ledger
 (`StockMovement`):
 
-- **Purchase** — incoming stock from a Supplier.
+- **Purchase** — incoming stock from a Supplier, received into a specific
+  Warehouse. See "Purchase module" below.
 - **Sales (POS)** — outgoing stock to a Customer.
 - **Transfer** — stock moved between warehouses.
 - **Stock Adjustment** — manual correction with a reason code.
+
+### Warehouse
+
+Stock is tracked per **Warehouse** — a user-created location (e.g. "Main
+Store", "Back Stock"). You can create as many warehouses as you use; every
+Purchase Order is received into exactly one warehouse, and every
+`StockBatch` / `StockMovement` row is tied to one. A warehouse can't be
+deleted while it still has linked purchase orders, batches, or movements.
 
 ### 4. Commercial modules
 
@@ -112,6 +121,9 @@ src/app/(dashboard)/currencies/         Currency CRUD (code, name, exchange rate
 src/app/(dashboard)/price-groups/       Price Group CRUD (e.g. Retail, Wholesale, VIP)
 src/app/(dashboard)/suppliers/          Supplier CRUD (name, contact, address)
 src/app/(dashboard)/products/           Product list + full create/edit form
+src/app/(dashboard)/warehouses/         Warehouse CRUD (name, address)
+src/app/(dashboard)/purchases/          Purchase Order list + create/edit/receive/payment UI
+src/lib/purchase.ts          Reference/batch-number generation, total + payment-status helpers
 src/app/api/                 REST API routes backing the pages above
 src/components/ui/           Shared Button and Modal components
 ```
@@ -138,6 +150,10 @@ src/components/ui/           Shared Button and Modal components
 - **Supplier**: name (unique), contact, address. Delete blocked while it's
   a product's default supplier or has linked purchases.
 - **Product**: the full product record — see "Product module" below.
+- **Warehouse**: name (unique), address. Delete blocked while it still has
+  linked purchase orders, stock batches, or stock movements.
+- **Purchase**: full order → receive workflow, payment tracking, and
+  batch/expiry-tracked stock intake — see "Purchase module" below.
 
 ## Product module
 
@@ -176,15 +192,71 @@ unit was used to enter a transaction. For example, if 1 box = 10 bottles
 and someone purchases 24 boxes, the system stores 240 bottles in stock —
 the `quantity` on `PurchaseOrderLine` / `SalesOrderLine` / `StockMovement`
 is always the base-unit amount, while `entryQuantity` + `entryUnit` keep a
-record of what was actually typed (24, box) for display and receipts. This
-conversion is defined in the schema now and will be wired into the
-Purchase/Sales/Stock forms when those modules are built.
+record of what was actually typed (24, box) for display and receipts.
+
+## Purchase module
+
+The Purchase page (`/purchases`) implements a two-step **order → receive**
+workflow, so creating a Purchase Order never moves stock by itself —
+only the separate Receive action does.
+
+### Order (draft)
+
+- **Supplier**, **Warehouse** (goods will be received into this
+  warehouse), **Currency**, **Order Date**.
+- **Reference Number** — Auto-generate (`PO-0001`, sequential) or Manual
+  entry, same auto/manual pattern as Product Code.
+- **Purchase Lines** — repeatable rows of {Product, entry Unit (any unit
+  in that product's unit family, e.g. Box), entry Quantity, Unit Cost}.
+  The line's base-unit quantity is computed automatically from the unit's
+  conversion factor (24 Box × 10 = 240 Bottle).
+- **Amount Paid** — optional, tracked independently of receiving.
+- Saving a Purchase Order creates it with status **ORDERED** and no stock
+  effect. Creating/editing a line also refreshes that product's
+  `defaultPurchasePrice` (converted to a per-base-unit cost) and
+  `defaultSupplierId`.
+- A draft can be freely edited (or deleted) as long as nothing on it has
+  been received yet.
+
+### Receive
+
+- The Receive action lets you enter how much actually arrived for each
+  line (independently, and it can be less than what was ordered).
+- Each receipt creates a **StockBatch** (lot) with:
+  - a **Batch Number** — Auto-generate (`BATCH-YYYYMMDD-XXX`, per day) or
+    Manual entry.
+  - an optional **Expiry Date**.
+  - the per-base-unit cost, carried over from the line's unit cost.
+- Each receipt also creates a **StockMovement** (type `PURCHASE`) row
+  referencing that batch, so all stock arrivals stay traceable to the lot
+  they came from.
+- A line can be received across multiple partial receipts; the order's
+  status is derived automatically:
+  - **ORDERED** — nothing received yet.
+  - **PARTIALLY_RECEIVED** — some, but not all, lines are fully received.
+  - **RECEIVED** — every line is fully received (`receivedAt` is set).
+- Receiving more than a line's remaining quantity is rejected.
+
+### Payment, cancel, and delete rules
+
+- **Payment Status** (`UNPAID` / `PARTIAL` / `PAID`) is derived
+  automatically from `amountPaid` vs. the order total, and can be updated
+  at any time (even after receiving) via the Payment action.
+- **Cancel** is only allowed on an `ORDERED` order that has nothing
+  received yet.
+- **Delete** is blocked once anything has been received
+  (`PARTIALLY_RECEIVED` / `RECEIVED`), since that would leave orphaned
+  stock history; `ORDERED` and `CANCELLED` orders can be deleted.
+- A full edit (changing supplier/warehouse/lines) is only allowed while
+  the order is still `ORDERED`.
 
 ## Status
 
 Actively being built out module by module. Main Category, Sub Category,
-Brand, Unit, Currency, Price Group, Supplier, and the full Product module
-are fully working end to end (create/edit/delete, including auto/manual
-code, system/original barcode, and multi price-group/currency pricing).
-Next up: Purchase and Sales, which will read from Product's default unit,
-supplier, and pricing to build the unified stock ledger.
+Brand, Unit, Currency, Price Group, Supplier, Product, Warehouse, and
+Purchase are all fully working end to end. Purchase covers the full
+order → receive workflow, auto/manual reference and batch numbering,
+expiry dates, payment tracking, and status-based edit/cancel/delete
+guards, and writes to the unified `StockMovement` ledger via `StockBatch`.
+Next up: Sales (POS), which will read stock from the batches Purchase
+creates.

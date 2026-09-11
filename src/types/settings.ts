@@ -22,3 +22,12 @@ export type SupplierDTO = {
   purchaseCount: number;
   productCount: number;
 };
+
+export type WarehouseDTO = {
+  id: string;
+  name: string;
+  address: string | null;
+  purchaseOrderCount: number;
+  movementCount: number;
+  batchCount: number;
+};

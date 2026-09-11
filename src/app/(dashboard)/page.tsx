@@ -21,7 +21,7 @@ const MODULES = [
   {
     group: "Operations",
     items: [
-      { label: "Purchase", href: null },
+      { label: "Purchase", href: "/purchases" },
       { label: "Sales (POS)", href: null },
       { label: "Transfer", href: null },
       { label: "Stock Adjustment", href: null },
@@ -31,6 +31,7 @@ const MODULES = [
     group: "Partners",
     items: [
       { label: "Supplier", href: "/suppliers" },
+      { label: "Warehouse", href: "/warehouses" },
       { label: "Customer", href: null },
     ],
   },

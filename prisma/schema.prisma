@@ -43,6 +43,19 @@ enum SalesContractStatus {
   CANCELLED
 }
 
+enum PurchaseOrderStatus {
+  ORDERED // saved, goods not yet received, no stock effect
+  PARTIALLY_RECEIVED // some lines/quantities received
+  RECEIVED // fully received, all lines complete
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
 enum ServiceTicketStatus {
   OPEN
   IN_PROGRESS
@@ -188,6 +201,7 @@ model Product {
   purchaseLines  PurchaseOrderLine[]
   salesLines     SalesOrderLine[]
   stockMovements StockMovement[]
+  stockBatches   StockBatch[]
   contractLines  SalesContractLine[]
 
   generalData Json? // free-form spec sheet fields (key/value pairs)
@@ -245,16 +259,28 @@ model Supplier {
 }
 
 model PurchaseOrder {
-  id         String              @id @default(cuid())
-  reference  String              @unique
-  supplier   Supplier            @relation(fields: [supplierId], references: [id])
-  supplierId String
-  currency   Currency            @relation(fields: [currencyId], references: [id])
-  currencyId String
-  lines      PurchaseOrderLine[]
-  orderedAt  DateTime            @default(now())
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
+  id              String              @id @default(cuid())
+  reference       String              @unique
+  referenceIsAuto Boolean             @default(true) // whether `reference` was system-generated vs typed in
+  supplier        Supplier            @relation(fields: [supplierId], references: [id])
+  supplierId      String
+  currency        Currency            @relation(fields: [currencyId], references: [id])
+  currencyId      String
+  warehouse       Warehouse           @relation(fields: [warehouseId], references: [id])
+  warehouseId     String
+  lines           PurchaseOrderLine[]
+
+  status PurchaseOrderStatus @default(ORDERED)
+
+  // Payment tracking (kept here for now; may move to a dedicated Accounts module later).
+  paymentStatus PaymentStatus @default(UNPAID)
+  amountPaid    Float         @default(0)
+
+  note       String?
+  orderedAt  DateTime  @default(now())
+  receivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 model PurchaseOrderLine {
@@ -273,7 +299,43 @@ model PurchaseOrderLine {
   // e.g. 24 boxes x 10 bottles/box = 240 (stored here, in bottles).
   quantity Float
 
+  // How many base units of this line have been received so far (supports
+  // partial receiving across multiple "Receive" actions).
+  receivedQuantity Float @default(0)
+
   unitCost Float // purchase cost per entry unit, per sketch
+
+  batches StockBatch[]
+}
+
+// A specific lot/batch of stock, created when a Purchase Order line is
+// (fully or partially) received into a Warehouse. Tracks received date and
+// an optional expiry date, and keeps a running remaining quantity so a
+// future Sales module can deduct from batches (e.g. FIFO / expiry-aware).
+model StockBatch {
+  id          String @id @default(cuid())
+  batchNumber String @unique // auto-generated, e.g. BATCH-20260911-001
+
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  warehouseId String
+
+  purchaseOrderLine   PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id])
+  purchaseOrderLineId String?
+
+  quantityReceived  Float // base units received into this batch
+  quantityRemaining Float // base units still on hand from this batch
+  unitCost          Float // cost per base unit (unitCost on the line, divided by its entry unit's conversion qty)
+
+  receivedAt DateTime  @default(now())
+  expiryDate DateTime?
+
+  movements StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------
@@ -327,11 +389,14 @@ model SalesOrderLine {
 // ---------------------------------------------------------------------------
 
 model Warehouse {
-  id        String          @id @default(cuid())
-  name      String          @unique
-  address   String?
-  movements StockMovement[]
-  createdAt DateTime        @default(now())
+  id             String          @id @default(cuid())
+  name           String          @unique
+  address        String?
+  movements      StockMovement[]
+  batches        StockBatch[]
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 }
 
 // Unified ledger: purchase / sale / transfer / adjustment all write here.
@@ -352,6 +417,9 @@ model StockMovement {
   entryQuantity Float?
   entryUnit     Unit?   @relation("StockMovementEntryUnit", fields: [entryUnitId], references: [id])
   entryUnitId   String?
+
+  batch   StockBatch? @relation(fields: [batchId], references: [id])
+  batchId String?
 
   reference String? // links back to PurchaseOrder / SalesOrder / Transfer / Adjustment id
   note      String?
