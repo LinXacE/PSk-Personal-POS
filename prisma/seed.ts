@@ -24,6 +24,20 @@ async function main() {
   });
 
   console.log(`Seeded admin user: ${admin.username} (password: ${password})`);
+
+  const mmk = await prisma.currency.upsert({
+    where: { code: "MMK" },
+    update: {},
+    create: { code: "MMK", name: "Myanmar Kyat", isDefault: true, exchangeRate: 1 },
+  });
+  console.log(`Seeded default currency: ${mmk.code}`);
+
+  const retail = await prisma.priceGroup.upsert({
+    where: { name: "Retail" },
+    update: {},
+    create: { name: "Retail", isDefault: true },
+  });
+  console.log(`Seeded default price group: ${retail.name}`);
 }
 
 main()

@@ -38,3 +38,38 @@ export type UnitDTO = {
   productCount: number;
   derivedUnitCount: number;
 };
+
+export type BarcodeSource = "ORIGINAL" | "SYSTEM";
+
+export type ProductPriceDTO = {
+  id?: string;
+  priceGroupId: string;
+  priceGroupName?: string;
+  currencyId: string;
+  currencyCode?: string;
+  price: number;
+};
+
+export type ProductDTO = {
+  id: string;
+  name: string;
+  code: string;
+  codeIsAuto: boolean;
+  type: CategoryType;
+  mainCategoryId: string;
+  mainCategoryName: string;
+  subCategoryId: string | null;
+  subCategoryName: string | null;
+  brandId: string | null;
+  brandName: string | null;
+  baseUnitId: string;
+  baseUnitName: string;
+  barcode: string;
+  barcodeSource: BarcodeSource;
+  defaultPurchasePrice: number | null;
+  defaultSupplierId: string | null;
+  defaultSupplierName: string | null;
+  generalData: Record<string, string> | null;
+  isActive: boolean;
+  prices: ProductPriceDTO[];
+};

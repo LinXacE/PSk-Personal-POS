@@ -7,6 +7,10 @@ const NAV_LINKS = [
   { href: "/sub-categories", label: "Sub Category" },
   { href: "/brands", label: "Brand" },
   { href: "/units", label: "Unit" },
+  { href: "/products", label: "Product" },
+  { href: "/currencies", label: "Currency" },
+  { href: "/price-groups", label: "Price Group" },
+  { href: "/suppliers", label: "Supplier" },
 ];
 
 export default async function DashboardLayout({

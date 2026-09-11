@@ -8,7 +8,14 @@ const MODULES = [
       { label: "Sub Category", href: "/sub-categories" },
       { label: "Brand", href: "/brands" },
       { label: "Unit", href: "/units" },
-      { label: "Product", href: null },
+      { label: "Product", href: "/products" },
+    ],
+  },
+  {
+    group: "Pricing",
+    items: [
+      { label: "Currency", href: "/currencies" },
+      { label: "Price Group", href: "/price-groups" },
     ],
   },
   {
@@ -23,7 +30,7 @@ const MODULES = [
   {
     group: "Partners",
     items: [
-      { label: "Supplier", href: null },
+      { label: "Supplier", href: "/suppliers" },
       { label: "Customer", href: null },
     ],
   },

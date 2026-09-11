@@ -108,6 +108,10 @@ src/app/(dashboard)/main-categories/   Main Category CRUD (list, create, edit, d
 src/app/(dashboard)/sub-categories/     Sub Category CRUD (linked to a Main Category)
 src/app/(dashboard)/brands/             Brand CRUD (list, create, edit, delete)
 src/app/(dashboard)/units/              Unit CRUD (base + purchase/selling conversions)
+src/app/(dashboard)/currencies/         Currency CRUD (code, name, exchange rate, default)
+src/app/(dashboard)/price-groups/       Price Group CRUD (e.g. Retail, Wholesale, VIP)
+src/app/(dashboard)/suppliers/          Supplier CRUD (name, contact, address)
+src/app/(dashboard)/products/           Product list + full create/edit form
 src/app/api/                 REST API routes backing the pages above
 src/components/ui/           Shared Button and Modal components
 ```
@@ -124,6 +128,46 @@ src/components/ui/           Shared Button and Modal components
 - **Unit**: define a base unit (e.g. "bottle") plus purchase/selling units
   that convert to it with a quantity (e.g. "box" = 10 bottles). A unit
   can't be deleted while other units or products still reference it.
+- **Currency**: code (e.g. MMK, USD), name, exchange rate relative to the
+  default currency, and an exclusive "default currency" flag (setting one
+  default automatically clears any other). Delete blocked while any
+  `ProductPrice`, purchase, or sale still references it.
+- **Price Group**: name (e.g. Retail, Wholesale, VIP) with the same
+  exclusive "default" flag pattern. Delete blocked while linked
+  `ProductPrice` rows exist.
+- **Supplier**: name (unique), contact, address. Delete blocked while it's
+  a product's default supplier or has linked purchases.
+- **Product**: the full product record — see "Product module" below.
+
+## Product module
+
+The Product page (`/products`) ties every other lookup module together:
+
+- **Name** and **Category** — a required Main Category (cascades to an
+  optional Sub Category filtered to that Main Category) and an optional
+  Brand.
+- **Base Unit** — required; must be a `BASE`-kind Unit. All stock for this
+  product is tracked in this unit (see "Unit conversion rule" below).
+- **Product Code** — user picks **Auto-generate** (derived from the Main
+  Category + Brand + a sequence number, e.g. `BEVERAGES-0001`) or
+  **Manual** entry (uniqueness-checked). Tracked via the `codeIsAuto` flag
+  so it can be changed later.
+- **Barcode** — a single field per product with a source toggle:
+  **System-generated** (a unique code assigned on save) or **Original**
+  (the manufacturer's own barcode, typed in and uniqueness-checked).
+- **Selling prices** — a repeatable table of {Price Group, Currency,
+  Price} rows, so the same product can have different prices per
+  Price Group *and* per Currency at the same time (no duplicate
+  Price Group + Currency combinations allowed on one product).
+- **Default Purchasing Price** and **Default Supplier** — the latest/
+  preferred purchase price and supplier (actual purchase history will
+  live on `PurchaseOrderLine` once the Purchase module is built).
+- **General Data** — a free-form key/value editor for spec-sheet fields
+  (e.g. Color, Size, Weight), stored as JSON.
+- Product documents (FDA/NHL certificates) are intentionally **not** part
+  of this page — they'll live in their own module later.
+- Deleting a product is blocked while it has purchase, sales, stock, or
+  contract history.
 
 ## Unit conversion rule
 
@@ -139,5 +183,8 @@ Purchase/Sales/Stock forms when those modules are built.
 ## Status
 
 Actively being built out module by module. Main Category, Sub Category,
-Brand, and Unit are fully working. Next up: the full Product page (which
-ties category, brand, and unit together), followed by Purchase and Sales.
+Brand, Unit, Currency, Price Group, Supplier, and the full Product module
+are fully working end to end (create/edit/delete, including auto/manual
+code, system/original barcode, and multi price-group/currency pricing).
+Next up: Purchase and Sales, which will read from Product's default unit,
+supplier, and pricing to build the unified stock ledger.
